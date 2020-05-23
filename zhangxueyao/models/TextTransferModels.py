@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """ 
 @author: RMSnow 
-@file: SimpleModels.py 
-@time: 2020/5/10 23:01
+@file: TextTransferModels.py 
+@time: 2020/5/23 18:57
 @contact: xueyao_98@foxmail.com
 
-# Text Models
+# Text transfer learning model
 """
 from keras.layers import Input
 from keras.layers import Bidirectional
@@ -21,11 +21,16 @@ from keras.initializers import Constant
 from keras import backend as K
 from keras.layers.core import Lambda
 
+from GradientReversal import GradientReversal
 
-class BiGRU:
-    def __init__(self, max_sequence_length, embedding_matrix, hidden_units=32, l2_param=0.01, lr_param=0.001):
+
+# EANN/DANN end2end model
+class End2endBiGRU:
+    def __init__(self, max_sequence_length, embedding_matrix, hidden_units=32, lambda_reversal_strength=1,
+                 l2_param=0.01, lr_param=0.001):
         self.max_sequence_length = max_sequence_length
         self.embedding_matrix = embedding_matrix
+        self.lambda_reversal_strength = lambda_reversal_strength
         self.hidden_units = hidden_units
         self.l2_param = l2_param
 
@@ -48,17 +53,23 @@ class BiGRU:
         pool = Concatenate()([avg_pool, max_pool])
 
         dense = Dense(32, activation='relu', kernel_regularizer=l2(self.l2_param))(pool)
-        output = Dense(2, activation='softmax', kernel_regularizer=l2(self.l2_param))(dense)
+        output = Dense(2, activation='softmax', kernel_regularizer=l2(self.l2_param), name='fake')(dense)
 
-        model = Model(inputs=[semantic_input], outputs=output)
+        category_in = GradientReversal(hp_lambda=self.lambda_reversal_strength)(pool)
+        category_out = Dense(8, activation='softmax', kernel_regularizer=l2(self.l2_param), name='category')(
+            category_in)
+
+        model = Model(inputs=[semantic_input], outputs=[output, category_out])
         return model
 
 
-class TextCNN:
-    def __init__(self, max_sequence_length, embedding_matrix, filters_num=100, l2_param=0.01, lr_param=0.001):
+class End2endTextCNN:
+    def __init__(self, max_sequence_length, embedding_matrix, filters_num=100, lambda_reversal_strength=1,
+                 l2_param=0.01, lr_param=0.001):
         self.max_sequence_length = max_sequence_length
         self.embedding_matrix = embedding_matrix
         self.filters_num = filters_num
+        self.lambda_reversal_strength = lambda_reversal_strength
         self.l2_param = l2_param
 
         self.model = self.build()
@@ -92,7 +103,11 @@ class TextCNN:
         cnn = Dropout(0.5)(cnn_merge)
 
         dense = Dense(32, activation='relu', kernel_regularizer=l2(self.l2_param))(cnn)
-        output = Dense(2, activation='softmax', kernel_regularizer=l2(self.l2_param))(dense)
+        output = Dense(2, activation='softmax', kernel_regularizer=l2(self.l2_param), name='fake')(dense)
 
-        model = Model(inputs=[semantic_input], outputs=output)
+        category_in = GradientReversal(hp_lambda=self.lambda_reversal_strength)(cnn)
+        category_out = Dense(8, activation='softmax', kernel_regularizer=l2(self.l2_param), name='category')(
+            category_in)
+
+        model = Model(inputs=[semantic_input], outputs=[output, category_out])
         return model

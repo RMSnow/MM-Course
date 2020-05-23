@@ -20,55 +20,81 @@ import joblib
 import matplotlib.pyplot as plt
 
 
-def loss_plot(hist_logs):
-    plt.plot()
-
-    # keras 版本问题
-    try:
+def loss_plot(hist_logs, multi_output=False):
+    if not multi_output:
         plt.plot(hist_logs['acc'], marker='*')
-    except KeyError:
-        plt.plot(hist_logs['accuracy'], marker='*')
-    try:
         plt.plot(hist_logs['val_acc'], marker='*')
-    except KeyError:
-        plt.plot(hist_logs['val_accuracy'], marker='*')
-    plt.plot(hist_logs['loss'], marker='*')
-    plt.plot(hist_logs['val_loss'], marker='*')
+        plt.plot(hist_logs['loss'], marker='*')
+        plt.plot(hist_logs['val_loss'], marker='*')
 
-    plt.title('model accuracy/loss')
-    plt.ylabel('accuracy/loss')
-    plt.xlabel('epoch')
-    plt.legend(['train_acc', 'val_acc', 'train_loss', 'val_loss'], loc='upper left')
+        plt.title('model accuracy/loss')
+        plt.ylabel('accuracy/loss')
+        plt.xlabel('epoch')
+        plt.legend(['train_acc', 'val_acc', 'train_loss', 'val_loss'], loc='upper left')
+    else:
+        fig, axes = plt.subplots(1, 2, sharey=True, figsize=(18, 4))
+
+        axes[0].plot(hist_logs['loss'], marker='*', label='train_loss')
+        axes[0].plot(hist_logs['fake_loss'], marker='*', label='train_fake_loss')
+        axes[0].plot(hist_logs['fake_acc'], marker='*', label='train_fake_acc')
+        axes[0].plot(hist_logs['val_loss'], marker='*', label='val_loss')
+        axes[0].plot(hist_logs['val_fake_loss'], marker='*', label='val_fake_loss')
+        axes[0].plot(hist_logs['val_fake_acc'], marker='*', label='val_fake_acc')
+
+        axes[0].set_title('model accuracy/loss')
+        axes[0].set_ylabel('accuracy/loss')
+        axes[0].set_xlabel('epoch')
+        axes[0].legend(loc="upper left", ncol=3)
+
+        axes[1].plot(hist_logs['loss'], marker='*', label='train_loss')
+        axes[1].plot(hist_logs['category_loss'], marker='*', label='train_category_loss')
+        axes[1].plot(hist_logs['category_acc'], marker='*', label='train_category_acc')
+        axes[1].plot(hist_logs['val_loss'], marker='*', label='val_loss')
+        axes[1].plot(hist_logs['val_category_loss'], marker='*', label='val_category_loss')
+        axes[1].plot(hist_logs['val_category_acc'], marker='*', label='val_category_acc')
+
+        axes[1].set_title('model accuracy/loss')
+        axes[1].set_ylabel('accuracy/loss')
+        axes[1].set_xlabel('epoch')
+        axes[1].legend(loc="upper left", ncol=3)
+
     plt.show()
 
 
 def train(model, model_name, train_data, test_data, train_label, test_label,
-          epochs=20, batch_size=128, early_stop=True, error_analysis=False):
+          epochs=20, batch_size=128, early_stop=True, error_analysis=False,
+          multi_output=False):
     model_file = './model/{}.hdf5'.format(model_name)
-    checkpoint = ModelCheckpoint(model_file, monitor='val_acc', verbose=0,
+
+    if not multi_output:
+        monitor = 'val_acc'
+    else:
+        monitor = 'val_fake_acc'
+
+    checkpoint = ModelCheckpoint(model_file, monitor=monitor, verbose=0,
                                  save_best_only=True, mode='auto', save_weights_only=True)
     if early_stop:
         early_stop = EarlyStopping(
-            monitor='val_acc', patience=10, verbose=1, mode='auto')
+            monitor=monitor, patience=10, verbose=1, mode='auto')
     else:
         early_stop = EarlyStopping(
-            monitor='val_acc', patience=epochs, verbose=1, mode='auto')
+            monitor=monitor, patience=epochs, verbose=1, mode='auto')
 
+    print(model.summary())
+    print()
     model_history = model.fit(train_data, train_label, epochs=epochs,
                               batch_size=batch_size, validation_data=(test_data, test_label),
                               shuffle=True, callbacks=[checkpoint, early_stop])
-    loss_plot(model_history.history)
+
+    loss_plot(model_history.history, multi_output)
 
     if error_analysis:
         predict_error_analysis(model, model_file, model_name, test_data, test_label)
     else:
-        predict(model, model_file, test_data, test_label)
+        predict(model, model_file, test_data, test_label, multi_output)
 
 
-def predict(model, model_file, test_data, test_label):
-    model.load_weights(model_file)
-    y_pred = model.predict(test_data)
-
+def predict_single_output(y_pred, test_label, labels_names):
     arg = y_pred.argmax(axis=1)
 
     y_pred_label = np.zeros(y_pred.shape)
@@ -83,11 +109,23 @@ def predict(model, model_file, test_data, test_label):
     print()
     print('Accuracy: {}'.format(accuracy))
     print()
-    print(classification_report(test_label, y_pred_label, labels=[0, 1],
-                                target_names=['truth', 'rumor'], digits=3))
+    print(classification_report(test_label, y_pred_label,
+                                labels=[i for i in range(len(labels_names))],
+                                target_names=labels_names, digits=3))
     print()
 
-    return y_pred
+
+def predict(model, model_file, test_data, test_label, multi_output=False):
+    model.load_weights(model_file)
+    y_pred = model.predict(test_data)
+
+    if not multi_output:
+        predict_single_output(y_pred, test_label, labels_names=['truth', 'rumor'])
+    else:
+        assert len(y_pred) == 2
+        predict_single_output(y_pred[0], test_label[0], labels_names=['truth', 'rumor'])
+        predict_single_output(y_pred[1], test_label[1], labels_names=[
+            '医药健康', '教育考试', '文体娱乐', '社会生活', '科技', '财经商业', '军事', '政治'])
 
 
 def predict_surely_analysis(model, model_file, test_data, test_label, analysis_num=10):
