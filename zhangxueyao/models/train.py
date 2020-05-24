@@ -13,9 +13,7 @@ import os
 from keras.callbacks import ModelCheckpoint, EarlyStopping
 from sklearn.metrics import classification_report
 from sklearn.metrics import accuracy_score
-from sklearn.metrics import roc_auc_score
-from keras.models import load_model
-import joblib
+from sklearn.utils import class_weight
 
 import matplotlib.pyplot as plt
 
@@ -63,38 +61,53 @@ def loss_plot(hist_logs, multi_output=False):
 
 def train(model, model_name, train_data, test_data, train_label, test_label,
           epochs=20, batch_size=128, early_stop=True, error_analysis=False,
-          multi_output=False):
+          multi_output=False, monitor=None, monitor_mode='auto',
+          labels_name=None, use_class_weights=False, to_predict=True):
     model_file = './model/{}.hdf5'.format(model_name)
 
-    if not multi_output:
-        monitor = 'val_acc'
-    else:
-        monitor = 'val_fake_acc'
+    if monitor is None:
+        if not multi_output:
+            monitor = 'val_acc'
+        else:
+            monitor = 'val_fake_acc'
 
     checkpoint = ModelCheckpoint(model_file, monitor=monitor, verbose=0,
-                                 save_best_only=True, mode='auto', save_weights_only=True)
+                                 save_best_only=True, mode=monitor_mode, save_weights_only=True)
     if early_stop:
         early_stop = EarlyStopping(
-            monitor=monitor, patience=10, verbose=1, mode='auto')
+            monitor=monitor, patience=10, verbose=1, mode=monitor_mode)
     else:
         early_stop = EarlyStopping(
-            monitor=monitor, patience=epochs, verbose=1, mode='auto')
+            monitor=monitor, patience=epochs, verbose=1, mode=monitor_mode)
 
     print(model.summary())
     print()
-    model_history = model.fit(train_data, train_label, epochs=epochs,
-                              batch_size=batch_size, validation_data=(test_data, test_label),
-                              shuffle=True, callbacks=[checkpoint, early_stop])
+    if not use_class_weights:
+        model_history = model.fit(train_data, train_label, epochs=epochs,
+                                  batch_size=batch_size, validation_data=(test_data, test_label),
+                                  shuffle=True, callbacks=[checkpoint, early_stop])
+    else:
+        train_label_ints = [y.argmax() for y in train_label]
+        cw = class_weight.compute_class_weight('balanced', np.unique(
+            train_label_ints), train_label_ints)
+
+        model_history = model.fit(train_data, train_label, epochs=epochs,
+                                  batch_size=batch_size, validation_data=(test_data, test_label),
+                                  shuffle=True, callbacks=[checkpoint, early_stop], class_weight=cw)
 
     loss_plot(model_history.history, multi_output)
 
-    if error_analysis:
-        predict_error_analysis(model, model_file, model_name, test_data, test_label)
-    else:
-        predict(model, model_file, test_data, test_label, multi_output)
+    if to_predict:
+        if error_analysis:
+            predict_error_analysis(model, model_file, model_name, test_data, test_label)
+        else:
+            predict(model, model_file, test_data, test_label, multi_output, labels_name)
 
 
 def predict_single_output(y_pred, test_label, labels_names):
+    if type(test_label) == list and len(test_label) == 1:
+        test_label = test_label[0]
+
     arg = y_pred.argmax(axis=1)
 
     y_pred_label = np.zeros(y_pred.shape)
@@ -115,12 +128,15 @@ def predict_single_output(y_pred, test_label, labels_names):
     print()
 
 
-def predict(model, model_file, test_data, test_label, multi_output=False):
+def predict(model, model_file, test_data, test_label, multi_output=False, labels_name=None):
     model.load_weights(model_file)
     y_pred = model.predict(test_data)
 
     if not multi_output:
-        predict_single_output(y_pred, test_label, labels_names=['truth', 'rumor'])
+        if labels_name is None:
+            predict_single_output(y_pred, test_label, labels_names=['truth', 'rumor'])
+        else:
+            predict_single_output(y_pred, test_label, labels_names=labels_name)
     else:
         assert len(y_pred) == 2
         predict_single_output(y_pred[0], test_label[0], labels_names=['truth', 'rumor'])

@@ -21,12 +21,17 @@ from keras.initializers import Constant
 from keras import backend as K
 from keras.layers.core import Lambda
 
+from GradientReversal import GradientReversal
+
 
 class BiGRU:
-    def __init__(self, max_sequence_length, embedding_matrix, hidden_units=32, l2_param=0.01, lr_param=0.001):
+    def __init__(self, max_sequence_length, embedding_matrix, hidden_units=32,
+                 output=2, gradient_reversal=False, l2_param=0.01, lr_param=0.001):
         self.max_sequence_length = max_sequence_length
         self.embedding_matrix = embedding_matrix
         self.hidden_units = hidden_units
+        self.output = output
+        self.gradient_reversal = gradient_reversal
         self.l2_param = l2_param
 
         self.model = self.build()
@@ -47,18 +52,24 @@ class BiGRU:
         max_pool = GlobalMaxPooling1D()(gru)
         pool = Concatenate()([avg_pool, max_pool])
 
-        dense = Dense(32, activation='relu', kernel_regularizer=l2(self.l2_param))(pool)
-        output = Dense(2, activation='softmax', kernel_regularizer=l2(self.l2_param))(dense)
+        dense = Dense(32, activation='relu',
+                      kernel_regularizer=l2(self.l2_param), name='category_branch')(pool)
+        if self.gradient_reversal:
+            dense = GradientReversal(hp_lambda=1)(dense)
+        output = Dense(self.output, activation='softmax', kernel_regularizer=l2(self.l2_param))(dense)
 
         model = Model(inputs=[semantic_input], outputs=output)
         return model
 
 
 class TextCNN:
-    def __init__(self, max_sequence_length, embedding_matrix, filters_num=100, l2_param=0.01, lr_param=0.001):
+    def __init__(self, max_sequence_length, embedding_matrix, filters_num=256,
+                 output=2, gradient_reversal=False, l2_param=0.01, lr_param=0.001):
         self.max_sequence_length = max_sequence_length
         self.embedding_matrix = embedding_matrix
         self.filters_num = filters_num
+        self.output = output
+        self.gradient_reversal = gradient_reversal
         self.l2_param = l2_param
 
         self.model = self.build()
@@ -91,8 +102,11 @@ class TextCNN:
         cnn_merge = Concatenate()(convs)
         cnn = Dropout(0.5)(cnn_merge)
 
-        dense = Dense(32, activation='relu', kernel_regularizer=l2(self.l2_param))(cnn)
-        output = Dense(2, activation='softmax', kernel_regularizer=l2(self.l2_param))(dense)
+        dense = Dense(32, activation='relu',
+                      kernel_regularizer=l2(self.l2_param), name='category_branch')(cnn)
+        if self.gradient_reversal:
+            dense = GradientReversal(hp_lambda=1)(dense)
+        output = Dense(self.output, activation='softmax', kernel_regularizer=l2(self.l2_param))(dense)
 
         model = Model(inputs=[semantic_input], outputs=output)
         return model
