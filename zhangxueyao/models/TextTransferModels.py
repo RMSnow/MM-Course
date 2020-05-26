@@ -14,6 +14,7 @@ from keras.layers import GlobalAveragePooling1D, GlobalMaxPooling1D
 from keras.layers import Dense
 from keras.layers import Embedding, Concatenate
 from keras.layers import Conv1D, MaxPooling1D, Flatten, Dropout
+from keras.layers import Reshape
 from keras.models import Model
 from keras.regularizers import l2
 from keras.optimizers import Adam
@@ -22,6 +23,7 @@ from keras import backend as K
 from keras.layers.core import Lambda
 
 from GradientReversal import GradientReversal
+from FusionLayers import SelfAttLayer
 
 
 # EANN/DANN end2end model
@@ -115,12 +117,13 @@ class End2endTextCNN:
 
 class TwoBranchesBiGRU:
     def __init__(self, max_sequence_length, embedding_matrix,
-                 related_branch_layer, unrelated_branch_layer, use_concat=True,
+                 related_branch_layer, unrelated_branch_layer, fusion_mode='concat',
                  hidden_units=32, output=2, l2_param=0.01, lr_param=0.001):
         self.max_sequence_length = max_sequence_length
         self.embedding_matrix = embedding_matrix
         self.related_branch_layer = related_branch_layer
         self.unrelated_branch_layer = unrelated_branch_layer
+        self.fusion_mode = fusion_mode
 
         self.hidden_units = hidden_units
         self.output = output
@@ -152,19 +155,35 @@ class TwoBranchesBiGRU:
         related_branch = Dense(32, activation='relu', trainable=False, name='related_branch')(pool)
         unrelated_branch = Dense(32, activation='relu', trainable=False, name='unrelated_branch')(pool)
 
-        # related_branch.set_weights(self.related_branch_layer.get_weights())
-        # unrelated_branch.set_weights(self.unrelated_branch_layer.get_weights())
-        #
-        # related_branch_dense = related_branch(pool)
-        # unrelated_branch_dense = unrelated_branch(pool)
-
-        # [n, 64]
-        dense = Concatenate()([related_branch, unrelated_branch])
+        if self.fusion_mode == 'concat':
+            # [n, 64]
+            dense = Concatenate()([related_branch, unrelated_branch])
+        elif self.fusion_mode == 'bilinear':
+            # [n, 32, 32] -> [n, 32*32]
+            bilinear = Lambda(self.bilinear_dot, name='bilinear')([related_branch, unrelated_branch])
+            flatten = Flatten()(bilinear)
+            dense = Dropout(0.5)(flatten)
+        elif self.fusion_mode == 'attention':
+            # [n, 32] -> [n, 1, 32]
+            related_branch_reshape = Reshape([1, 32])(related_branch)
+            unrelated_branch_reshape = Reshape([1, 32])(unrelated_branch)
+            branches = Concatenate(axis=1)([related_branch_reshape, unrelated_branch_reshape])
+            dense = SelfAttLayer()(branches)
 
         output = Dense(self.output, activation='softmax', kernel_regularizer=l2(self.l2_param))(dense)
 
         model = Model(inputs=[semantic_input], outputs=output)
         return model
+
+    def bilinear_dot(self, branches):
+        # branches[0],[1] : [n, 32] -> [n, 32, 1]
+        a = K.expand_dims(branches[0])
+        b = K.expand_dims(branches[1])
+        # [n, 32, 32]
+        dot = K.batch_dot(a, b, axes=[2, 2])
+
+        sign_sqr = K.sign(dot) * K.sqrt(K.abs(dot) + 1e-10)
+        return K.l2_normalize(sign_sqr, axis=-1)
 
 
 class TwoBranchesTextCNN:
