@@ -118,12 +118,15 @@ class End2endTextCNN:
 class TwoBranchesBiGRU:
     def __init__(self, max_sequence_length, embedding_matrix,
                  related_branch_layer, unrelated_branch_layer, fusion_mode='concat',
+                 use_related_branch=True, use_unrelated_branch=True,
                  hidden_units=32, output=2, l2_param=0.01, lr_param=0.001):
         self.max_sequence_length = max_sequence_length
         self.embedding_matrix = embedding_matrix
         self.related_branch_layer = related_branch_layer
         self.unrelated_branch_layer = unrelated_branch_layer
         self.fusion_mode = fusion_mode
+        self.use_related_branch = use_related_branch
+        self.use_unrelated_branch = use_unrelated_branch
 
         self.hidden_units = hidden_units
         self.output = output
@@ -131,8 +134,10 @@ class TwoBranchesBiGRU:
 
         self.model = self.build()
 
-        self.model.get_layer('related_branch').set_weights(related_branch_layer.get_weights())
-        self.model.get_layer('unrelated_branch').set_weights(unrelated_branch_layer.get_weights())
+        if use_related_branch:
+            self.model.get_layer('related_branch').set_weights(related_branch_layer.get_weights())
+        if use_unrelated_branch:
+            self.model.get_layer('unrelated_branch').set_weights(unrelated_branch_layer.get_weights())
 
         self.model.compile(loss='categorical_crossentropy', optimizer=Adam(lr=lr_param, beta_1=0.8),
                            metrics=['accuracy'])
@@ -155,20 +160,28 @@ class TwoBranchesBiGRU:
         related_branch = Dense(32, activation='relu', trainable=False, name='related_branch')(pool)
         unrelated_branch = Dense(32, activation='relu', trainable=False, name='unrelated_branch')(pool)
 
-        if self.fusion_mode == 'concat':
-            # [n, 64]
-            dense = Concatenate()([related_branch, unrelated_branch])
-        elif self.fusion_mode == 'bilinear':
-            # [n, 32, 32] -> [n, 32*32]
-            bilinear = Lambda(self.bilinear_dot, name='bilinear')([related_branch, unrelated_branch])
-            flatten = Flatten()(bilinear)
-            dense = Dropout(0.5)(flatten)
-        elif self.fusion_mode == 'attention':
-            # [n, 32] -> [n, 1, 32]
-            related_branch_reshape = Reshape([1, 32])(related_branch)
-            unrelated_branch_reshape = Reshape([1, 32])(unrelated_branch)
-            branches = Concatenate(axis=1)([related_branch_reshape, unrelated_branch_reshape])
-            dense = SelfAttLayer()(branches)
+        if self.use_related_branch and self.use_unrelated_branch:
+            if self.fusion_mode == 'concat':
+                # [n, 64]
+                dense = Concatenate()([related_branch, unrelated_branch])
+            elif self.fusion_mode == 'bilinear':
+                # [n, 32, 32] -> [n, 32*32]
+                bilinear = Lambda(self.bilinear_dot, name='bilinear')([related_branch, unrelated_branch])
+                flatten = Flatten()(bilinear)
+                dense = Dropout(0.5)(flatten)
+            elif self.fusion_mode == 'attention':
+                # [n, 32] -> [n, 1, 32]
+                related_branch_reshape = Reshape([1, 32])(related_branch)
+                unrelated_branch_reshape = Reshape([1, 32])(unrelated_branch)
+                branches = Concatenate(axis=1)([related_branch_reshape, unrelated_branch_reshape])
+                dense = SelfAttLayer()(branches)
+        elif self.use_unrelated_branch:
+            dense = unrelated_branch
+        elif self.use_related_branch:
+            dense = related_branch
+        else:
+            print('ERROR!')
+            return None
 
         output = Dense(self.output, activation='softmax', kernel_regularizer=l2(self.l2_param))(dense)
 
