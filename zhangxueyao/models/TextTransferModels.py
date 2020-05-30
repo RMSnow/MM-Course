@@ -173,8 +173,8 @@ class TwoBranchesBiGRU:
                 # [n, 32] -> [n, 1, 32]
                 related_branch_reshape = Reshape([1, 32])(related_branch)
                 unrelated_branch_reshape = Reshape([1, 32])(unrelated_branch)
-                branches = Concatenate(axis=1)([related_branch_reshape, unrelated_branch_reshape])
-                dense = SelfAttLayer()(branches)
+                branches = Concatenate(axis=1, name='two_branches')([related_branch_reshape, unrelated_branch_reshape])
+                dense = SelfAttLayer(name='two_branches_attention')(branches)
         elif self.use_unrelated_branch:
             dense = unrelated_branch
         elif self.use_related_branch:

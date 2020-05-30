@@ -30,11 +30,9 @@ class SelfAttLayer(Layer):
     def call(self, x, mask=None):
         # (n, steps, dim) dot (dim,) -> (n, steps)
         e = K.exp(K.tanh(K.sum(x * self.W, axis=-1)))
-        # print('e: ', e.shape)
 
         # (n, steps) / (n, 1) -> (n, steps)
         a = e / K.expand_dims(K.sum(e, axis=1), axis=-1)
-        # print(a.shape)
 
         # (n, steps, dim) * (n, steps, 1) -> (n, steps, dim)
         weighted_input = x * K.expand_dims(a, axis=-1)
