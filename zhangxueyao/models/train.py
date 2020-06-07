@@ -10,7 +10,7 @@
 import numpy as np
 import os
 
-from keras.callbacks import ModelCheckpoint, EarlyStopping
+from keras.callbacks import ModelCheckpoint, EarlyStopping, Callback
 from sklearn.metrics import classification_report
 from sklearn.metrics import accuracy_score
 from sklearn.utils import class_weight
@@ -57,6 +57,18 @@ def loss_plot(hist_logs, multi_output=False):
         axes[1].legend(loc="upper left", ncol=3)
 
     plt.show()
+
+
+class TestCallback(Callback):
+    def __init__(self, test_data):
+        self.test_data = test_data
+
+    def on_epoch_end(self, epoch, logs={}):
+        x1, y1, x2, y2 = self.test_data
+        loss, acc = self.model.evaluate(x1, y1, verbose=0)
+        print('\nValidation loss: {}, acc: {}'.format(loss, acc))
+        loss, acc = self.model.evaluate(x2, y2, verbose=0)
+        print('Testing loss: {}, acc: {}\n'.format(loss, acc))
 
 
 def train(model, model_name, train_data, test_data, train_label, test_label,
